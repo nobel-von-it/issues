@@ -107,6 +107,11 @@ func main() {
 		panic(err)
 	}
 
+	if len(issues) == 0 {
+		fmt.Println("No issues found")
+		return
+	}
+
 	sort.Slice(issues, func(i, j int) bool {
 		return issues[i].Number < issues[j].Number
 	})
