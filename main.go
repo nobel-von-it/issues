@@ -11,6 +11,20 @@ import (
 	"strings"
 )
 
+const (
+	Reset = "\033[0m"
+	Bold  = "\033[1m"
+	Dim   = "\033[2m"
+)
+
+func bold(s string) string {
+	return Bold + s + Reset
+}
+
+func dim(s string) string {
+	return Dim + s + Reset
+}
+
 type Issue struct {
 	Number int
 	Title  string
@@ -166,20 +180,21 @@ func runWithId(client *http.Client, user, repo string, issueId int) error {
 		return err
 	}
 
-	for _, e := range events {
+	fmt.Println("events for issue", issueId)
+	for i, e := range events {
 		if e.CommitID != nil {
-			fmt.Println("Commit:", *e.CommitID)
+			fmt.Printf("  - %d: commit id %s\n", i, dim((*e.CommitID)[:7]))
 		}
 		if e.Milestone != nil {
-			fmt.Println("Milestone:", e.Milestone.Title)
+			fmt.Printf("  - %d: milestone %s\n", i, bold(e.Milestone.Title))
 		}
 		if e.Rename != nil {
-			fmt.Println("Renamed:")
-			fmt.Println("  -", e.Rename.From)
-			fmt.Println("  -", e.Rename.To)
+			fmt.Printf("  - %d: renamed\n", i)
+			fmt.Println("    -", e.Rename.From)
+			fmt.Println("    -", e.Rename.To)
 		}
 		if e.Label != nil {
-			fmt.Println("Label:", e.Label.Name)
+			fmt.Printf("  - %d: label %s\n", i, bold(e.Label.Name))
 		}
 	}
 
@@ -209,8 +224,9 @@ func run(client *http.Client, user, repo string) error {
 		return issues[i].Number < issues[j].Number
 	})
 	for _, issue := range issues {
-		fmt.Printf("%d: %s\n", issue.Number, issue.Title)
-		fmt.Println(issue.Body)
+		fmt.Println(bold(fmt.Sprintf("%d: %s", issue.Number, issue.Title)))
+		fmt.Println("  - " + issue.Body)
+		fmt.Println()
 	}
 
 	return nil
