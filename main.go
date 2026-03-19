@@ -7,12 +7,35 @@ import (
 	"net/http"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 )
 
 type Issue struct {
 	Number int
 	Title  string
+	Body   string
+}
+
+type IssueEvent struct {
+	Event     string     `json:"event"`
+	CommitID  *string    `json:"commit_id,omitempty"`
+	Milestone *Milestone `json:"milestone,omitempty"`
+	Rename    *Rename    `json:"rename,omitempty"`
+	Label     *Label     `json:"label,omitempty"`
+}
+
+type Milestone struct {
+	Title string `json:"title"`
+}
+
+type Rename struct {
+	From string `json:"from"`
+	To   string `json:"to"`
+}
+
+type Label struct {
+	Name string `json:"name"`
 }
 
 func findGitRoot(path string) (string, error) {
@@ -50,7 +73,7 @@ func getUserAndRepo(content string) (string, string, error) {
 			}
 
 			user = strings.Split(userAndRepo, "/")[0]
-			repo = strings.Split(userAndRepo, "/")[1]
+			repo = strings.Trim(strings.Split(userAndRepo, "/")[1], "\n\t\r")
 			if strings.Contains(repo, ".git") {
 				repo = repo[:len(repo)-5]
 			}
@@ -65,6 +88,7 @@ func getUserAndRepo(content string) (string, string, error) {
 
 func main() {
 	cwd, _ := os.Getwd()
+
 	gitRoot, err := findGitRoot(cwd)
 	if err != nil {
 		panic(err)
@@ -83,20 +107,89 @@ func main() {
 		panic(err)
 	}
 
-	url := getApiUrl(user, repo)
+	args := os.Args[1:]
+
+	var issueId *int
+
+	if len(args) > 0 {
+		if n, err := strconv.Atoi(args[0]); err == nil {
+			issueId = &n
+		} else {
+			fmt.Fprintf(os.Stderr, "Ошибка: '%s' не является числом\n", args[0])
+			os.Exit(1)
+		}
+	}
+
 	client := &http.Client{}
 
-	res, err := client.Get(url)
+	if issueId != nil {
+		err = runWithId(client, user, repo, *issueId)
+	} else {
+		err = run(client, user, repo)
+	}
 	if err != nil {
 		panic(err)
+	}
+
+}
+
+func getFromGithub(client *http.Client, url string) ([]byte, error) {
+	res, err := client.Get(url)
+	if err != nil {
+		return []byte{}, fmt.Errorf("Error: %s", err)
 	}
 	defer res.Body.Close()
 
 	if res.StatusCode != 200 {
-		panic(fmt.Sprintf("Error: %d", res.StatusCode))
+		return []byte{}, fmt.Errorf("Error: %d", res.StatusCode)
 	}
 
 	bodyBytes, err := io.ReadAll(res.Body)
+	if err != nil {
+		return []byte{}, fmt.Errorf("Error: %s", err)
+	}
+
+	return bodyBytes, nil
+}
+
+func runWithId(client *http.Client, user, repo string, issueId int) error {
+	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/issues/%d/events", user, repo, issueId)
+
+	bodyBytes, err := getFromGithub(client, url)
+	if err != nil {
+		return err
+	}
+
+	var events []IssueEvent
+	err = json.Unmarshal([]byte(bodyBytes), &events)
+	if err != nil {
+		return err
+	}
+
+	for _, e := range events {
+		if e.CommitID != nil {
+			fmt.Println("Commit:", *e.CommitID)
+		}
+		if e.Milestone != nil {
+			fmt.Println("Milestone:", e.Milestone.Title)
+		}
+		if e.Rename != nil {
+			fmt.Println("Renamed:")
+			fmt.Println("  -", e.Rename.From)
+			fmt.Println("  -", e.Rename.To)
+		}
+		if e.Label != nil {
+			fmt.Println("Label:", e.Label.Name)
+		}
+	}
+
+	return nil
+}
+
+func run(client *http.Client, user, repo string) error {
+	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/issues", user, repo)
+
+	bodyBytes, err := getFromGithub(client, url)
 	if err != nil {
 		panic(err)
 	}
@@ -109,7 +202,7 @@ func main() {
 
 	if len(issues) == 0 {
 		fmt.Println("No issues found")
-		return
+		return nil
 	}
 
 	sort.Slice(issues, func(i, j int) bool {
@@ -117,5 +210,8 @@ func main() {
 	})
 	for _, issue := range issues {
 		fmt.Printf("%d: %s\n", issue.Number, issue.Title)
+		fmt.Println(issue.Body)
 	}
+
+	return nil
 }
